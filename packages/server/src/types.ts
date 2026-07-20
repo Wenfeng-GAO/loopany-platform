@@ -26,7 +26,7 @@ import type { ArtifactMeta } from './server/frontmatter'
  *  web agent `<select>` (LoopForm). So widening the set is a one-line edit HERE with
  *  no other server change (the daemon's own enum in `packages/daemon/src/create.ts`
  *  is a separate package, widened alongside). */
-export const CODING_AGENTS = ['claude-code', 'codex', 'grok'] as const
+export const CODING_AGENTS = ['claude-code', 'codex', 'grok', 'cld'] as const
 export type CodingAgent = (typeof CODING_AGENTS)[number]
 
 /** Coerce an unknown value to a known `CodingAgent`, or null when unrecognized.

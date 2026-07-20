@@ -161,6 +161,31 @@ export function buildAgentSpawn(opts: {
       ],
     };
   }
+  if (agent === "cld") {
+    // cld → `cld cfuse …` (CodeFuse Claude Code-compatible mode via the user's
+    // cld CLI wrapper). cfuse --cc is a claude-code-compatible surface: it
+    // accepts the same -p / stream-json --verbose / --permission-mode / --resume
+    // flags verbatim and emits claude-shaped stream-json (system/assistant/result
+    // with session_id, is_error, total_cost_usd, usage), so the Claude-shaped
+    // makeStreamConsumer parses it natively — NOT the degraded grok/codex path.
+    // cld + cfuse-claude-code already hardcode --dangerously-skip-permissions,
+    // which coexists with --permission-mode bypassPermissions. cld is an
+    // OPT-IN executor (no env fingerprint — declare via --agent cld), for hosts
+    // where the native claude binary is unavailable. Escape hatch: LOOPANY_CLD_BIN.
+    return {
+      bin: process.env.LOOPANY_CLD_BIN || "cld",
+      args: [
+        "cfuse", "-p", prompt,
+        ...resume,
+        "--output-format", "stream-json",
+        "--verbose",
+        "--permission-mode", "bypassPermissions",
+        ...(sysFile ? ["--append-system-prompt-file", sysFile] : []),
+        "--disallowed-tools", SELF_SCHEDULING_TOOLS,
+        ...modelArgs,
+      ],
+    };
+  }
   return {
     bin: process.env.LOOPANY_CLAUDE_BIN || "claude",
     args: [

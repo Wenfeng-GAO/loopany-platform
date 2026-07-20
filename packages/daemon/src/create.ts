@@ -97,13 +97,13 @@ export function idempotencyKey(token: string, resolvedBody: Record<string, unkno
 }
 
 /** The coding agents Loopany can record a loop against (TS-only; cheap to widen). */
-export type CodingAgent = "claude-code" | "codex" | "grok";
+export type CodingAgent = "claude-code" | "codex" | "grok" | "cld";
 
 /** Coerce an arbitrary declared value (--agent flag / config.agent) to a known
  *  agent, or null when it's absent/unrecognized (so it can't override a measurement
  *  and the server falls back to its own default). */
 export function coerceAgent(v: unknown): CodingAgent | null {
-  return v === "claude-code" || v === "codex" || v === "grok" ? v : null;
+  return v === "claude-code" || v === "codex" || v === "grok" || v === "cld" ? v : null;
 }
 
 /**
@@ -155,7 +155,7 @@ export async function runCreate(args: string[], deps: CreateDeps = {}): Promise<
   const jsonArg = flag(args, "json");
   const dryRun = args.includes("--dry-run");
   if (jsonArg === undefined) {
-    process.stderr.write("loopany: usage: loopany new --json '<config>' [--dry-run] [--connect-key dk_…] [--tz <IANA>] [--agent claude-code|codex|grok]\n");
+    process.stderr.write("loopany: usage: loopany new --json '<config>' [--dry-run] [--connect-key dk_…] [--tz <IANA>] [--agent claude-code|codex|grok|cld]\n");
     return 2;
   }
 

@@ -162,6 +162,12 @@ export function execEnv(agent: CodingAgent = "claude-code"): NodeJS.ProcessEnv {
       keys: ["OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_HOME"],
     });
   }
+  if (agent === "cld") {
+    // cld cfuse reads its own credentials from ~/.config/cld/env (CLD_*) and
+    // cfuse authenticates itself — no ANTHROPIC_/xAI/OpenAI key rides the run.
+    // HOME + PATH (BASE_ALLOW) are enough for cld to find its env file + cfuse.
+    return allowlistEnv({ keys: [] });
+  }
   return allowlistEnv({
     keys: ["CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR"],
     prefixes: ["ANTHROPIC_"],

@@ -754,8 +754,7 @@ export class MachineGateway {
     // Recorded coding agent: trust the daemon's resolved value when it's a known
     // agent, else default to claude-code (older daemons omit it; an unrecognized /
     // "unknown" value also degrades to the default rather than rejecting the loop).
-    const agent: CodingAgent =
-      body.agent === "codex" || body.agent === "grok" ? body.agent : "claude-code";
+    const agent: CodingAgent = coerceCodingAgent(body.agent) ?? "claude-code";
 
     const stateSchema = store.coerceStateSchema(body.stateSchema) ?? null;
     // Optional day-one dashboard — same validate/clip surface as `set-ui` (editLoop).
