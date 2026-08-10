@@ -42,6 +42,19 @@ export function dbPoolMode(): "transaction" | "session" | undefined {
 }
 
 /**
+ * Runtime connection-pool size override (`db/poolOptions.ts` `DEFAULT_POOL_MAX`).
+ * The right value is dictated by the POOLER's client cap - an external constraint
+ * that can change without a deploy - so it is tunable here. Returns undefined when
+ * unset or unparseable, leaving the documented default in force.
+ */
+export function dbPoolMax(): number | undefined {
+  const raw = process.env.LOOPANY_DB_POOL_MAX?.trim();
+  if (!raw) return undefined;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+/**
  * Direct (session-mode, `:5432`) Postgres URL used ONLY for migrations — DDL and
  * the migrator's advisory lock must NOT go through the transaction pooler. Falls
  * back to `DATABASE_URL` when unset (e.g. a plain non-pooled Postgres).
@@ -99,12 +112,16 @@ export function r2Config(): R2Config | null {
  * the bias is "keep storage bounded without ever surprising a healthy loop".
  */
 
-/** A positive env integer, or `fallback` when unset / unparseable / non-positive. */
+/** A positive env integer, or `fallback` when unset / unparseable / non-positive.
+ *  Floors BEFORE the positivity test: `0.5` used to pass `n > 0` and then floor to
+ *  `0`, which every caller reads as a disabling value (for the watchdog's starved
+ *  ceiling that silently turned the guard off entirely). A fractional value below 1
+ *  is nonsense for all of these knobs, so it falls back rather than becoming 0. */
 function posIntEnv(name: string, fallback: number): number {
   const raw = process.env[name]?.trim();
   if (!raw) return fallback;
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+  const n = Math.floor(Number(raw));
+  return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
 /**
@@ -185,6 +202,41 @@ export function dbWatchdogTimeoutMs(): number {
  */
 export function dbWatchdogFailureThreshold(): number {
   return posIntEnv("LOOPANY_DB_WATCHDOG_FAILURES", 3);
+}
+
+/**
+ * Consecutive INCONCLUSIVE (event-loop-starved) watchdog ticks tolerated before the
+ * watchdog exits anyway (`server/dbWatchdog.ts` `DEFAULT_STARVED_CEILING`).
+ *
+ * The starvation guard must be an excuse, not an alibi: a wedged pool can coexist
+ * with a busy event loop, and an unbounded guard would hand back the 2026-07-12
+ * failure mode (~9h down, no auto-recovery). Default 45 ticks, ~15min at the 20s
+ * cadence - far above the 3-failure threshold, so the 2026-08-10 crash-loop
+ * amplification stays broken while recovery stays bounded.
+ */
+export function dbWatchdogStarvedCeiling(): number {
+  return posIntEnv("LOOPANY_DB_WATCHDOG_STARVED_MAX", 45);
+}
+
+/**
+ * Event-loop delay above which a FAILED watchdog ping is treated as inconclusive
+ * rather than as evidence of a wedged pool (`server/dbWatchdog.ts`).
+ *
+ * Default 1000ms. A healthy server sits in single-digit ms; even a heavy GC pause or
+ * a busy SSR burst stays well under a second. A full second of delay means the
+ * process cannot service its own sockets or timers on schedule, so a `select 1` that
+ * blew its 5s deadline says nothing about the database. That was the 2026-08-10
+ * outage: ~6% of a core (88% steal) made every ping fail against a healthy DB, and
+ * the watchdog's restarts turned a slow box into a crash loop.
+ *
+ * Set to 0 to disable the guard and restore the old always-blame-the-DB behavior.
+ * The guard is bounded regardless by `dbWatchdogStarvedCeiling` above, so it can
+ * never become a permanent excuse for a genuinely wedged pool.
+ */
+export function dbWatchdogLagCeilingMs(): number {
+  const raw = process.env.LOOPANY_DB_WATCHDOG_LAG_CEILING_MS?.trim();
+  if (raw === "0") return 0;
+  return posIntEnv("LOOPANY_DB_WATCHDOG_LAG_CEILING_MS", 1_000);
 }
 
 /**

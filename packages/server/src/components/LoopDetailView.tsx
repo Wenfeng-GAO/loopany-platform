@@ -110,8 +110,12 @@ export function LoopDetailView({ id }: { id: string }) {
       .catch(() => {})
   }, [id, load])
 
-  // Self-poll the page (fast while a run is live), but not mid-edit (don't churn
-  // the form) or mid-delete (the optimistic tombstone).
+  // Self-poll the page (fast while a run is EXECUTING), but not mid-edit (don't
+  // churn the form) or mid-delete (the optimistic tombstone). The fast cadence is
+  // deliberately gated on `running` alone, never on a merely QUEUED run: a running
+  // run is bounded by RUN_TIMEOUT_MS (~20min) so 3s is self-limiting, whereas a run
+  // queued for an offline machine can sit for 7 days - polling that at 3s pinned
+  // every such page (and the server) at the live cadence indefinitely.
   const running = !!detail?.summary.running
   useEffect(() => {
     if (editing || del.armed) return
@@ -279,9 +283,24 @@ export function LoopDetailView({ id }: { id: string }) {
   // A closed loop still working toward its goal (not yet completed).
   const closedActive = isClosed(s) && !completed
   const onMachine = detail.machine.name ? `“${detail.machine.name}”` : 'the bound machine'
+  // A QUEUED run is waiting to be claimed, not executing. Name the reason instead
+  // of the old pulsing "Running" badge, which claimed work was under way while the
+  // bound machine was shut. The scheduler allows at most one open run per loop, so
+  // any queued run in the list IS the one being described (order is irrelevant).
+  const queuedRun = s.queued ? runs.find((r) => r.queued) : undefined
+  const queuedLabel = !online ? (asleep ? 'Queued - machine asleep' : 'Queued - machine offline') : 'Queued'
+  // The gateway sweep stamps the concrete reason on the run itself; prefer it over
+  // our inference, and fall back to a plain explanation when it hasn't stamped yet.
+  const queuedReason =
+    queuedRun?.progress?.label ??
+    (online
+      ? 'Waiting for the machine to pick it up'
+      : `Waiting for ${onMachine} to reconnect - it runs as soon as it does`)
   // The dispatched edit run (once the poll surfaces it) drives the status card.
   const editRun = editDispatched ? findEditRun(runs) : undefined
-  const editSettled = !!editRun && !editRun.running
+  // "Settled" means the edit pass reached a terminal state - a queued edit run has
+  // not settled either, so both open states count as still in flight here.
+  const editSettled = !!editRun && !editRun.running && !editRun.queued
   const editInFlight = editDispatched && !editSettled
   const dismissEdit = () => {
     if (editRun) seenRunIds.current.add(editRun.id) // a dismissed run never re-surfaces as "the" edit
@@ -468,14 +487,19 @@ export function LoopDetailView({ id }: { id: string }) {
     <div className="flex flex-wrap items-center gap-2">
       <button
         className={btnPrimary}
-        disabled={busy || !online || completed || s.running}
+        // Both open states block a second dispatch (the scheduler refuses to stack
+        // agents on one loop), but they are blocked for DIFFERENT reasons, so the
+        // tooltip must not claim a run is in progress when one is merely queued.
+        disabled={busy || !online || completed || s.running || s.queued}
         onClick={onRun}
         title={
           s.running
             ? 'A run is already in progress'
-            : completed
-              ? 'Loop completed - reopen it to run again'
-              : offlineHint ?? (job.exec ? 'Spends credits' : undefined)
+            : s.queued
+              ? queuedReason
+              : completed
+                ? 'Loop completed - reopen it to run again'
+                : offlineHint ?? (job.exec ? 'Spends credits' : undefined)
         }
         aria-label={job.exec ? 'Run once - spends credits' : 'Run once'}
       >
@@ -624,6 +648,9 @@ export function LoopDetailView({ id }: { id: string }) {
                   Running
                 </Pill>
               )}
+              {!s.running && s.queued && (
+                <Pill title={queuedReason ?? undefined}>{queuedLabel}</Pill>
+              )}
               {completed ? (
                 <Pill tone="success" dot="green">
                   Completed
@@ -701,11 +728,22 @@ export function LoopDetailView({ id }: { id: string }) {
           aria-live="polite"
         >
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            {/* The pulse is the LIVE signal light - it may only appear while an agent
+                is actually working. A waiting edit gets a still dot and says so, which
+                is the whole point of splitting queued from running. */}
             {!editRun ? (
               <span className="inline-flex items-center gap-2.5 text-body text-secondary">
-                <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={runPulseStyle} />
+                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-disabled" />
                 <span className="font-medium text-primary">Edit queued</span>
                 <span>waiting for {onMachine} to pick it up…</span>
+              </span>
+            ) : editRun.queued ? (
+              <span className="inline-flex min-w-0 items-center gap-2.5 text-body text-secondary">
+                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-disabled" />
+                <span className="shrink-0 font-medium text-primary">Edit queued</span>
+                <span className="truncate">
+                  {editRun.progress?.label ?? `waiting for ${onMachine} to pick it up…`}
+                </span>
               </span>
             ) : editRun.running ? (
               <span className="inline-flex min-w-0 items-center gap-2.5 text-body text-secondary">
@@ -910,10 +948,18 @@ function RunsSection({
                       </span>
                     </span>
                     <span className="mt-0.5 block">
-                      {x.running && x.progress ? (
+                      {/* A queued run carries the sweep's reason in the same field
+                          ("deferred - machine offline"), which is exactly what the
+                          row should say - so show the line for both open states. */}
+                      {(x.running || x.queued) && x.progress ? (
                         <span className="inline-flex items-center gap-2 text-meta text-secondary">
-                          <span aria-hidden className="size-1.5 rounded-full" style={runPulseStyle} />
-                          <span className="text-disabled">{x.progress.step}</span>
+                          {/* Pulse only while executing; a queued row is still. */}
+                          <span
+                            aria-hidden
+                            className={`size-1.5 rounded-full${x.running ? '' : ' bg-disabled'}`}
+                            style={x.running ? runPulseStyle : undefined}
+                          />
+                          {x.running && <span className="text-disabled">{x.progress.step}</span>}
                           <span className="truncate">{x.progress.label}</span>
                         </span>
                       ) : x.error ? (

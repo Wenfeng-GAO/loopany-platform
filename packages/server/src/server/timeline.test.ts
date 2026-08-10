@@ -4,6 +4,7 @@ import type { Loop } from '../db/schema.js'
 import type { TimelineRun } from '../db/store.js'
 import {
   MAX_PROJECTED_PER_LOOP,
+  projectedMark,
   projectFires,
   runToMark,
   sumCosts,
@@ -91,11 +92,32 @@ describe('projectFires', () => {
 })
 
 describe('runToMark', () => {
-  it('derives running/canceled from phase, matching toRunSummary', () => {
+  it('derives running/queued/canceled from phase, matching toRunSummary', () => {
     expect(runToMark(run({ phase: 'running' })).running).toBe(true)
-    expect(runToMark(run({ phase: 'pending' })).running).toBe(true)
     expect(runToMark(run({ phase: 'done' })).running).toBe(false)
     expect(runToMark(run({ phase: 'canceled' })).canceled).toBe(true)
+  })
+
+  // A pending run is QUEUED, never running: it has not been claimed, so nothing is
+  // executing. Collapsing the two painted a pulsing "Running" mark on a run waiting
+  // for an offline machine and held every such view at its 3s live-poll cadence for
+  // as long as the machine stayed away (up to DEFERRED_MAX_MS, 7 days).
+  it('keeps a pending run QUEUED and not running', () => {
+    const m = runToMark(run({ phase: 'pending' }))
+    expect(m.queued).toBe(true)
+    expect(m.running).toBe(false)
+  })
+
+  it('leaves queued false for every non-pending phase', () => {
+    expect(runToMark(run({ phase: 'running' })).queued).toBe(false)
+    expect(runToMark(run({ phase: 'done' })).queued).toBe(false)
+    expect(runToMark(run({ phase: 'canceled' })).queued).toBe(false)
+  })
+
+  it('marks a PROJECTED fire neither running nor queued', () => {
+    const m = projectedMark('loop-1', '2026-07-21T06:00:00.000Z')
+    expect(m.running).toBe(false)
+    expect(m.queued).toBe(false)
   })
 
   it('carries the run id so a mark links to its run page', () => {

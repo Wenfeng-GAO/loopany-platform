@@ -6,6 +6,8 @@
  * from any server-side entry (the standalone machine server / TanStack server
  * fns); the first call boots, the rest share the same instance.
  */
+import { monitorEventLoopDelay } from "node:perf_hooks";
+
 import { sql } from "drizzle-orm";
 
 import { runMigrations, closeClient, db } from "../db/index.js";
@@ -20,6 +22,8 @@ import {
   dbWatchdogIntervalMs,
   dbWatchdogTimeoutMs,
   dbWatchdogFailureThreshold,
+  dbWatchdogLagCeilingMs,
+  dbWatchdogStarvedCeiling,
 } from "../env.js";
 import { Scheduler, type Dispatcher } from "../scheduler/index.js";
 import { startDbWatchdog } from "./dbWatchdog.js";
@@ -105,15 +109,41 @@ async function boot(): Promise<Booted> {
     const intervalMs = dbWatchdogIntervalMs();
     const timeoutMs = dbWatchdogTimeoutMs();
     const failureThreshold = dbWatchdogFailureThreshold();
-    logger.info({ intervalMs, timeoutMs, failureThreshold }, "db watchdog: armed");
+    const lagCeilingMs = dbWatchdogLagCeilingMs();
+    const starvedCeiling = dbWatchdogStarvedCeiling();
+    // Event-loop delay, so a failed ping under CPU starvation is not misread as a
+    // wedged pool (server/dbWatchdog.ts). `max` over the window since the last read
+    // is the right statistic: we want the WORST stall in the interval that contained
+    // the failed ping, which a mean would smooth away. Reset each read so the signal
+    // tracks the current window rather than the whole process lifetime. The monitor
+    // samples at the libuv level rather than from a JS timer: it cannot record while
+    // JS is blocking the loop, but the overdue sample lands as soon as the loop
+    // resumes, so the stall still shows up in `max` — which is what we read.
+    const loopDelay = lagCeilingMs > 0 ? monitorEventLoopDelay({ resolution: 20 }) : null;
+    loopDelay?.enable();
+    const lagMs = loopDelay
+      ? () => {
+          const maxNs = loopDelay.max;
+          loopDelay.reset();
+          return Number.isFinite(maxNs) ? maxNs / 1e6 : 0;
+        }
+      : undefined;
+    logger.info(
+      { intervalMs, timeoutMs, failureThreshold, lagCeilingMs, starvedCeiling },
+      "db watchdog: armed",
+    );
     const stopWatchdog = startDbWatchdog({
       probe: () => db.execute(sql`select 1`),
       exit: (code) => process.exit(code),
       intervalMs,
       timeoutMs,
       failureThreshold,
+      ...(lagMs ? { lagMs, lagCeilingMs, starvedCeiling } : {}),
     });
-    abort.signal.addEventListener("abort", () => stopWatchdog(), { once: true });
+    abort.signal.addEventListener("abort", () => {
+      stopWatchdog();
+      loopDelay?.disable();
+    }, { once: true });
   }
 
   logger.info("loopany server booted");
