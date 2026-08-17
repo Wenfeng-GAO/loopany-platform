@@ -95,6 +95,23 @@ describe("execEnv", () => {
     expect(env.OPENAI_API_KEY).toBeUndefined();
     expect(env.CODEX_API_KEY).toBeUndefined();
   });
+
+  test("cld path forwards only BASE_ALLOW — no agent credentials (cld cfuse self-authenticates)", () => {
+    setEnv("ANTHROPIC_API_KEY", "sk-x");
+    setEnv("CLAUDE_CODE_OAUTH_TOKEN", "claude-tok");
+    setEnv("OPENAI_API_KEY", "sk-openai");
+    setEnv("XAI_API_KEY", "xai-secret");
+    setEnv("LOOPANY_TOKEN", "dk_secret"); // device token never reaches the agent
+    const env = execEnv("cld");
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    expect(env.OPENAI_API_KEY).toBeUndefined();
+    expect(env.XAI_API_KEY).toBeUndefined();
+    expect(env.LOOPANY_TOKEN).toBeUndefined();
+    // cld reads ~/.config/cld/env via HOME; cfuse is resolved via PATH.
+    expect(env.HOME).toBe(process.env.HOME);
+    expect(env.PATH).toBe(process.env.PATH);
+  });
 });
 
 describe("allowlistEnv", () => {

@@ -20,6 +20,7 @@ const AGENT_LABEL: Record<CodingAgent, string> = {
   'claude-code': 'Claude Code',
   codex: 'Codex',
   grok: 'Grok Build',
+  cld: 'CLD (cfuse)',
 }
 
 // The one human-readable instruction the snippet carries. `/api/bootstrap` serves the

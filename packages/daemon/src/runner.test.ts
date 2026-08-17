@@ -226,6 +226,7 @@ describe("buildAgentSpawn", () => {
     delete process.env.LOOPANY_CLAUDE_BIN;
     delete process.env.LOOPANY_GROK_BIN;
     delete process.env.LOOPANY_CODEX_BIN;
+    delete process.env.LOOPANY_CLD_BIN;
   });
 
   test("claude-code: default bin + the claude arg vector (--verbose, stream-json, sys file)", () => {
@@ -313,6 +314,30 @@ describe("buildAgentSpawn", () => {
       "-m", "o3",
       "continue",
     ]);
+  });
+
+  test("cld: cld cfuse arm — claude-shaped flags prefixed with the cfuse subcommand", () => {
+    // cld cfuse → cfuse --cc is claude-code-compatible, so it KEEPS --verbose /
+    // stream-json / sys-file (unlike grok); only the bin + a leading "cfuse" differ.
+    const { bin, args } = buildAgentSpawn({ agent: "cld", prompt: "do it", sysFile: "/tmp/sys.md" });
+    expect(bin).toBe("cld");
+    expect(args).toEqual([
+      "cfuse", "-p", "do it",
+      "--output-format", "stream-json",
+      "--verbose",
+      "--permission-mode", "bypassPermissions",
+      "--append-system-prompt-file", "/tmp/sys.md",
+      "--disallowed-tools", "ScheduleWakeup,CronCreate,CronList,CronDelete",
+    ]);
+  });
+
+  test("cld: LOOPANY_CLD_BIN escape hatch + resume + model, sys file omitted when absent", () => {
+    process.env.LOOPANY_CLD_BIN = "/opt/cld";
+    const { bin, args } = buildAgentSpawn({ agent: "cld", prompt: "p", resumeSessionId: "s-1", model: "opus" });
+    expect(bin).toBe("/opt/cld");
+    expect(args.slice(0, 5)).toEqual(["cfuse", "-p", "p", "--resume", "s-1"]);
+    expect(args).not.toContain("--append-system-prompt-file");
+    expect(args.slice(-2)).toEqual(["--model", "opus"]);
   });
 });
 

@@ -707,7 +707,7 @@ computes pure functions. Run instructions: `README.md`.
 - `loopany update` hands the running daemon over to the invoking (new) CLI version:
   `down` then `runEnsure({force:true})` - force skips the still-reported-online
   short-circuit (server `ONLINE_TTL` 30s outlives the local pidfile clear).
-- `loops.agent` (`CodingAgent` enum: `claude-code|codex|grok`) records the loop's host
+- `loops.agent` (`CodingAgent` enum: `claude-code|codex|grok|cld`) records the loop's host
   coding agent AND selects the executor (at create: measured env fingerprint >
   `--agent` > server default; detection markers in `create.ts detectAgentFromEnv`).
   Editable afterward on the edit path - in `EDITABLE_LOOP_FIELDS`, `loopany edit
@@ -724,6 +724,16 @@ computes pure functions. Run instructions: `README.md`.
     `-m`; resume is `codex exec resume <sessionId> …`; `execEnv("codex")` forwards
     `OPENAI_API_KEY`/`CODEX_API_KEY`/`CODEX_HOME` (session/config under `~/.codex`
     free via `HOME`)
+  - `cld` → `cld cfuse` (`LOOPANY_CLD_BIN`, default `cld`): CodeFuse's
+    Claude Code-compatible mode (`cfuse --cc`) via the user's `cld` CLI. OPT-IN
+    (no env fingerprint — declare `--agent cld`) for hosts where the native
+    `claude` binary is unavailable. Keeps the full claude-code flag set (`-p`,
+    stream-json, `--verbose`, `--permission-mode bypassPermissions`, `--resume`,
+    sys-prompt-file) verbatim — cfuse `--cc` emits claude-shaped stream-json, so
+    telemetry is NOT degraded (unlike grok/codex); `cld`/`cfuse-claude-code`
+    already hardcode `--dangerously-skip-permissions`. `execEnv("cld")` forwards
+    ONLY `BASE_ALLOW` (HOME/PATH) — cld reads `~/.config/cld/env` and cfuse
+    self-authenticates.
   **Non-Claude telemetry is DEGRADED**: grok's headless stream is grok-native
   (`thought`/`text`/`end`, no cost/usage) and codex `--json` is not Claude
   stream-json, so the Claude-shaped `makeStreamConsumer` parses nothing — a run
